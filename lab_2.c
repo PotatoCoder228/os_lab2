@@ -19,8 +19,13 @@ static struct proc_dir_entry *our_proc_file;
 static char procfs_buffer[PROCFS_MAX_SIZE] = {0};
 static unsigned long procfs_buffer_size = 0;
 
+static atomic_t already_open = ATOMIC_INIT(0);
+
+static DECLARE_WAIT_QUEUE_HEAD(waitq);
+
 static ssize_t procfs_read(struct file *file, char __user *buffer,
                            size_t length, loff_t *offset) {
+  // semaphore
   printk(KERN_NOTICE "procfs_read: procfs_buffer=%s\n", procfs_buffer);
   static int finished = 0;
   procfs_buffer_size = PROCFS_MAX_SIZE - 1;
@@ -71,12 +76,26 @@ static ssize_t procfs_read(struct file *file, char __user *buffer,
 }
 
 static int procfs_open(struct inode *inode, struct file *file) {
+  if ((file->f_flags & O_NONBLOCK) && atomic_read(&already_open))
+    return -EAGAIN;
   try_module_get(THIS_MODULE);
-  return 0;
+  while (atomic_cmpxchg(&already_open, 0, 1)) {
+    int i, is_sig = 0;
+    wait_event_interruptible(waitq, !atomic_read(&already_open));
+    for (i = 0; i < _NSIG_WORDS && !is_sig; i++)
+      is_sig = current->pending.signal.sig[i] & ~current->blocked.sig[i];
+    if (is_sig) {
+      module_put(THIS_MODULE);
+      return -EINTR;
+    }
+  }
+  return 0; /* Разрешение доступа. */
 }
 static int procfs_close(struct inode *inode, struct file *file) {
+  atomic_set(&already_open, 0);
+  wake_up(&waitq);
   module_put(THIS_MODULE);
-  return 0;
+  return 0; /* Успех. */
 }
 
 static ssize_t procfs_write(struct file *file, const char __user *buffer,
