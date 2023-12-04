@@ -53,10 +53,20 @@ static ssize_t procfs_read(struct file *file, char __user *buffer,
   snprintf(str, 100, "\ncpu_itime: expires=%llu, incr=%llu\n", tmr.expires,
            tmr.incr);
   strcat(procfs_buffer, str);
+  struct mm_struct *mm = task->mm;
+  unsigned long address = get_unmapped_area(file, 0, 10, 0, 0);
+  struct vm_area_struct *vma = find_vma(mm, address);
+  printk(KERN_NOTICE "procfs_read: vm_area_struct ptr %llu\n", vma);
+  snprintf(str, 200,
+           "\nvm_area_struct: vm_start=%llu, vm_end=%llu, vm_mm ptr=%llu\n",
+           vma->vm_start, vma->vm_end, vma->vm_mm);
+  strcat(procfs_buffer, str);
   printk(KERN_NOTICE "%s", procfs_buffer);
   if (copy_to_user(buffer, procfs_buffer, procfs_buffer_size))
     return -EFAULT;
   printk(KERN_NOTICE "procfs_read: read %lu bytes\n", procfs_buffer_size);
+
+  // printk(KERN_NOTICE "procfs_read: vm_area_struct ptr %llu\n",current->mm);
   return procfs_buffer_size;
 }
 
@@ -71,7 +81,7 @@ static int procfs_close(struct inode *inode, struct file *file) {
 
 static ssize_t procfs_write(struct file *file, const char __user *buffer,
                             size_t len, loff_t *off) {
-  memset(procfs_buffer, 0,PROCFS_MAX_SIZE);
+  memset(procfs_buffer, 0, PROCFS_MAX_SIZE);
   procfs_buffer_size = len;
   if (procfs_buffer_size > PROCFS_MAX_SIZE)
     procfs_buffer_size = PROCFS_MAX_SIZE;
